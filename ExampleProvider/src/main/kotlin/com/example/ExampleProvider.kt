@@ -29,7 +29,7 @@ class ExampleProvider : MainAPI() { // All providers must be an instance of Main
                 url = href,
                 TvType = TvType.Anime
             ) {
-                this.posterUrl = posterUrl
+                this.poster = posterUrl
             }
         }
     }
