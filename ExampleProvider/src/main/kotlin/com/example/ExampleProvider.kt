@@ -16,7 +16,7 @@ class ExampleProvider : MainAPI() { // All providers must be an instance of Main
 
     // This function gets called when you search for something
     override suspend fun search(query: String): List<SearchResponse> {
-        var document = app.get(mainUrl + "s?=$query").document
+        var document = app.get("$mainUrl?s=$query").document
 
         return document.select("article.bs").mapNotNull { element ->
 
@@ -27,6 +27,7 @@ class ExampleProvider : MainAPI() { // All providers must be an instance of Main
             if (href.isEmpty()) return@mapNotNull null
 
             val posterUrl = fixUrl(element.select("img").attr("src"))
+            if (posterUrl.isEmpty()) return@mapNotNull null
 
             listOf(
                 newTvSeriesSearchResponse(title, href, TvType.Anime) {
