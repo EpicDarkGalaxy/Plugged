@@ -16,7 +16,7 @@ class ExampleProvider : MainAPI() { // All providers must be an instance of Main
 
     // This function gets called when you search for something
     override suspend fun search(query: String): List<SearchResponse> {
-        var docment = app.get(mainUrl + "search?keyword=$query").document
+        var document = app.get(mainUrl + "search?keyword=$query").document
 
         return document.select("div.bs").mapNotNull {
             element ->
