@@ -7,7 +7,7 @@ import com.lagradost.cloudstream3.*
 class ExampleProvider : MainAPI() { // All providers must be an instance of MainAPI
     override var mainUrl = "https://animexin.dev/" 
     override var name = "animexin"
-    override val supportedTypes = setOf(TvType.Movie)
+    override val supportedTypes = setOf(TvType.Anime)
 
     override var lang = "en"
 
