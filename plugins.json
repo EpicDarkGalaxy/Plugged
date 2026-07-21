@@ -1,0 +1,22 @@
+[
+    {
+        "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Korduene_Logo.png",
+        "fileHash": "sha256-7e06bae6507b09c882f2c60bb18d2b164430a86b8d4386ce57520f572d8d5028",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/EpicDarkGalaxy/Plugged",
+        "fileSize": 15642,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "EpicDark"
+        ],
+        "tvTypes": [
+            "Anime"
+        ],
+        "version": 6,
+        "internalName": "ExampleProvider",
+        "description": "For now, just learning",
+        "url": "https://raw.githubusercontent.com/EpicDarkGalaxy/Plugged/builds/ExampleProvider.cs3",
+        "name": "ExampleProvider"
+    }
+]

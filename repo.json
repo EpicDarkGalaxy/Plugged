@@ -1,0 +1,8 @@
+{
+		"name": "My plug",
+		"description": "Plug to plug",
+		"manifestVersion": 1,
+		"pluginLists": [
+		    "https://raw.githubusercontent.com/aman-boop/Plugged/refs/heads/builds/plugins.json"
+		]
+}
