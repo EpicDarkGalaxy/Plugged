@@ -39,7 +39,7 @@ class ExampleProvider : MainAPI() {
         val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: return null
         
         // Fixed: Ensure poster is guaranteed to be a non-null String using an empty string fallback
-        val poster = fixUrlNull(document.selectFirst("div.thumb img")?.attr("src")) ?: ""
+        val poster: String = fixUrlNull(document.selectFirst("div.thumb img")?.attr("src")) ?: ""
         
         val description = document.selectFirst("div.entry-content p")?.text()?.trim()
         val genres = document.select("div.genxrel a").map { it.text() }
