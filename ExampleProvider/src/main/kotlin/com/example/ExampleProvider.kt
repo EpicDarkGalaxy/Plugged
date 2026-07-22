@@ -73,7 +73,7 @@ class ExampleProvider : MainAPI() { // All providers must be an instance of Main
         this.posterUrl = poster
         this.plot = description
         this.tags = genres
-        this.status = status // Fixed property name from showStatus to status
+        this.showStatus = status // Fixed property name from showStatus to status
     }
 }
 
