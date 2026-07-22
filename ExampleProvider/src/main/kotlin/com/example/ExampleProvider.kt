@@ -32,19 +32,21 @@ class ExampleProvider : MainAPI() {
         }.flatten()
     }
 
-    override suspend fun load(url: String): LoadResponse? {
+        override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
         // 1. Parse basic details from the show's page
         val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: return null
-        
-        // Fixed: Ensure poster is guaranteed to be a non-null String using an empty string fallback
-        val poster: String = fixUrlNull(document.selectFirst("div.thumb img")?.attr("src")) ?: ""
-        
         val description = document.selectFirst("div.entry-content p")?.text()?.trim()
         val genres = document.select("div.genxrel a").map { it.text() }
+        
+        // Status parsing matching ShowStatus enum correctly
+        val status = when {
+            document.selectFirst("div.info-content span")?.text()?.contains("Completed", true) == true -> ShowStatus.Completed
+            else -> ShowStatus.Ongoing
+        }
 
-        // 2. Parse episodes list using the recommended newEpisode method
+        // 2. Parse episodes list using newEpisode
         val episodes = document.select("div.episodelist ul li").mapNotNull { element ->
             val episodeHref = fixUrl(element.select("a").attr("href"))
             if (episodeHref.isEmpty()) return@mapNotNull null
@@ -58,11 +60,13 @@ class ExampleProvider : MainAPI() {
             }
         }.reversed()
 
-        // 3. Return the proper LoadResponse type
-        return newTvSeriesLoadResponse(title, url, TvType.Anime, episodes) {
-            this.posterUrl = poster
+        // 3. Return using newAnimeLoadResponse with proper properties
+        return newAnimeLoadResponse(title, url, TvType.Anime, episodes) {
+            this.posterUrl = fixUrl(document.selectFirst("div.thumb img")?.attr("src"))
             this.plot = description
             this.tags = genres
+            this.showStatus = status // Officially supported in AnimeLoadResponse
         }
-    }
+        }
+        
 }
