@@ -45,11 +45,11 @@ class ExampleProvider : MainAPI() {
         }
 
         // 2. Parse episodes list using newEpisode
-        val episodes = document.select("div.episodelist ul li").mapNotNull { element ->
+        val episodes = document.select("div.eplister ul li").mapNotNull { element ->
             val episodeHref = fixUrl(element.select("a").attr("href"))
             if (episodeHref.isEmpty()) return@mapNotNull null
             
-            val episodeName = element.select("span.eps").text().trim()
+            val episodeName = element.select("div.epl-title").text().trim()
             val episodeNumber = Regex("""\d+""").find(episodeName)?.value?.toIntOrNull()
 
             newEpisode(episodeHref) {
