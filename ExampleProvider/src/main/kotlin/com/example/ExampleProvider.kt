@@ -14,36 +14,34 @@ class ExampleProvider : MainAPI() {
         val document = app.get("$mainUrl?s=$query").document
 
         return document.select("article.bs").mapNotNull { element ->
-
-            val title = element.select("h2").text()
-            if (title.isEmpty()) return@mapNotNull null
-
+            val title = element.select("h2").text().trim()
             val href = fixUrl(element.select("a").attr("href"))
-            if (href.isEmpty()) return@mapNotNull null
-
             val posterUrl = fixUrl(element.select("img").attr("src"))
-            if (posterUrl.isEmpty()) return@mapNotNull null
 
-            listOf(
-                newTvSeriesSearchResponse(title, href, TvType.Anime) {
-                    this.posterUrl = posterUrl
-                }
-            )   
-        }.flatten()
+            // If we are missing crucial data, skip this element
+            if (title.isEmpty() || href.isEmpty()) return@mapNotNull null
+
+            // Return AnimeSearchResponse directly
+            newAnimeSearchResponse(title, href, TvType.Anime) {
+                this.posterUrl = posterUrl
+            }   
+        }
     }
 
-        override suspend fun load(url: String): LoadResponse? {
+    override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
         // 1. Parse basic details from the show's page
         val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: return null
         val description = document.selectFirst("div.entry-content p")?.text()?.trim()
-        val genres = document.select("div.genxrel a").map { it.text() }
+        val genres = document.select("div.genxrel a").map { it.text().trim() }
         
         // Status parsing matching ShowStatus enum correctly
+        val statusText = document.selectFirst("div.info-content span")?.text() ?: ""
         val status = when {
-            document.selectFirst("div.info-content span")?.text()?.contains("Completed", true) == true -> ShowStatus.Completed
-            else -> ShowStatus.Ongoing
+            statusText.contains("Completed", true) -> ShowStatus.Completed
+            statusText.contains("Ongoing", true) -> ShowStatus.Ongoing
+            else -> null
         }
 
         // 2. Parse episodes list using newEpisode
@@ -51,22 +49,27 @@ class ExampleProvider : MainAPI() {
             val episodeHref = fixUrl(element.select("a").attr("href"))
             if (episodeHref.isEmpty()) return@mapNotNull null
             
-            val episodeName = element.select("span.eps").text()
+            val episodeName = element.select("span.eps").text().trim()
             val episodeNumber = Regex("""\d+""").find(episodeName)?.value?.toIntOrNull()
 
             newEpisode(episodeHref) {
                 this.name = episodeName
                 this.episode = episodeNumber
             }
-        }.reversed()
+        }.reversed() // Reverse so Episode 1 comes first (anime sites usually list newest first)
 
         // 3. Return using newAnimeLoadResponse with proper properties
-        return newAnimeLoadResponse(title, url, TvType.Anime, episodes) {
-            this.posterUrl = fixUrl(document.selectFirst("div.thumb img")?.attr("src")) ?: ""
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
+            this.posterUrl = fixUrl(document.selectFirst("div.thumb img")?.attr("src") ?: "")
             this.plot = description
             this.tags = genres
-            this.showStatus = status // Officially supported in AnimeLoadResponse
+            this.showStatus = status 
+            
+            // Assign the episodes list to a Subbed or Dubbed category
+            addEpisodes(DubStatus.Subbed, episodes) 
+            
+            // Note: If your Cloudstream version doesn't recognize addEpisodes, 
+            // you can use: this.episodes[DubStatus.Subbed] = episodes
         }
-        }
-        
+    }
 }
