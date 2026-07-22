@@ -61,8 +61,8 @@ class ExampleProvider : MainAPI() {
         }.reversed()
 
         // 3. Return using newAnimeLoadResponse with proper properties
-        return newAnimeLoadResponse(title, url, TvType.Anime, episodes) {
-            this.posterUrl = fixUrl(document.selectFirst("div.thumb img")?.attr("src"))
+        return newAnimeLoadResponse(title, url, TvType.Anime, episodes: episodes) {
+            this.posterUrl = fixUrl(document.selectFirst("div.thumb img")?.attr("src")) ?: ""
             this.plot = description
             this.tags = genres
             this.showStatus = status // Officially supported in AnimeLoadResponse
