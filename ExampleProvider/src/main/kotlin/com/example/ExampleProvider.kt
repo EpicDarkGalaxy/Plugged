@@ -2,11 +2,10 @@ package com.example
 
 import android.util.Base64
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.*
 import org.jsoup.Jsoup
 
-class ExampleProvider : MainAPI() {
+class ExampleProvider : MainAPI() { 
     override var mainUrl = "https://animexin.dev/" 
     override var name = "animexin"
     override val supportedTypes = setOf(TvType.Anime)
@@ -18,34 +17,40 @@ class ExampleProvider : MainAPI() {
         val document = app.get("$mainUrl?s=$query").document
 
         return document.select("article.bs").mapNotNull { element ->
-            val title = element.select("h2").text().ifEmpty { return@mapNotNull null }
-            val href = fixUrl(element.select("a").attr("href")).ifEmpty { return@mapNotNull null }
-            val posterUrl = fixUrl(element.select("img").attr("src")).ifEmpty { return@mapNotNull null }
+            val title = element.select("h2").text().trim()
+            val href = fixUrl(element.select("a").attr("href"))
+            val posterUrl = fixUrl(element.select("img").attr("src"))
+
+            if (title.isEmpty() || href.isEmpty()) return@mapNotNull null
 
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = posterUrl
-            }
+            }   
         }
     }
 
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
+        // 1. Parse basic details from the show's page
         val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: return null
-        val poster = fixUrl(document.selectFirst("div.thumb img")?.attr("src") ?: "")
         val description = document.selectFirst("div.entry-content p")?.text()?.trim()
-        val genres = document.select("div.genxrel a").map { it.text() }
+        val genres = document.select("div.genxrel a").map { it.text().trim() }
         
-        val status = when (document.selectFirst("div.info-content span")?.text()?.contains("Completed", ignoreCase = true) == true) {
-            true -> ShowStatus.Completed
-            else -> ShowStatus.Ongoing
+        val statusText = document.selectFirst("div.info-content span")?.text() ?: ""
+        val status = when {
+            statusText.contains("Completed", true) -> ShowStatus.Completed
+            statusText.contains("Ongoing", true) -> ShowStatus.Ongoing
+            else -> null
         }
 
-        // Fixed deprecated Episode constructor -> replaced with newEpisode
+        // 2. Parse episodes list using newEpisode
         val episodes = document.select("div.eplister ul li").mapNotNull { element ->
             val episodeHref = fixUrl(element.select("a").attr("href"))
-            val episodeName = element.select("span.eps").text()
-            val episodeNumber = Regex("""\d+""").find(episodeName)?.value?.toIntOrNull()
+            if (episodeHref.isEmpty()) return@mapNotNull null
+            
+            val episodeName = element.select("div.epl-title").text().trim()
+            val episodeNumber = element.select("div.epl-num").text().toIntOrNull()
 
             newEpisode(episodeHref) {
                 this.name = episodeName
@@ -53,17 +58,17 @@ class ExampleProvider : MainAPI() {
             }
         }.reversed()
 
-        // Fixed DubStatus.Sub -> DubStatus.Subbed and mapped with mutableMapOf
+        // 3. Return using newAnimeLoadResponse with proper properties
         return newAnimeLoadResponse(title, url, TvType.Anime) {
-            this.posterUrl = poster
+            this.posterUrl = fixUrl(document.selectFirst("div.thumb img")?.attr("src") ?: "")
             this.plot = description
             this.tags = genres
-            this.showStatus = status
-            this.episodes = mutableMapOf(DubStatus.Subbed to episodes)
+            this.showStatus = status 
+            
+            addEpisodes(DubStatus.Subbed, episodes) 
         }
     }
 
-    // Fixed function signature by removing offset parameter
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -71,54 +76,40 @@ class ExampleProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
-        val iframeUrls = mutableListOf<String>()
-
+        
+        // Keywords signaling Indonesian language streams
         val indoKeywords = listOf("indo", "indonesia", "sub indo", "subindo")
 
-        // 1. Process server selector dropdowns
-        document.select("select.mirror option, option[value]").forEach { option ->
-            val labelText = option.text().lowercase()
-            val rawValue = option.attr("value").trim()
+        // Select option elements from mirror dropdown
+        val options = document.select("select.mirror option")
 
-            val isIndonesian = indoKeywords.any { labelText.contains(it) }
+        for (option in options) {
+            val optionText = option.text().lowercase()
+            val encodedString = option.attr("value").trim()
 
-            if (!isIndonesian && rawValue.isNotEmpty()) {
-                val decodedUrl = decodeEmbedValue(rawValue)
-                if (decodedUrl.isNotEmpty()) {
-                    iframeUrls.add(fixUrl(decodedUrl))
+            // Skip options that explicitly match Indonesian sub tags
+            val isIndonesian = indoKeywords.any { optionText.contains(it) }
+            if (isIndonesian || encodedString.isBlank()) continue
+
+            try {
+                // Decode Base64 snippet to extract the actual iframe source
+                val decodedHtml = String(Base64.decode(encodedString, Base64.DEFAULT))
+                val iframeDocument = Jsoup.parse(decodedHtml)
+                val iframeUrl = iframeDocument.select("iframe").attr("src")
+
+                if (iframeUrl.isNotBlank()) {
+                    loadExtractor(
+                        url = fixUrl(iframeUrl),
+                        referer = data,
+                        subtitleCallback = subtitleCallback,
+                        callback = callback
+                    )
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
 
-        // 2. Fallback to direct iframe elements on the page
-        if (iframeUrls.isEmpty()) {
-            document.select("div.player-embed iframe, div.embed-responsive iframe").forEach { iframe ->
-                val parentText = iframe.parent()?.text()?.lowercase() ?: ""
-                val isIndonesian = indoKeywords.any { parentText.contains(it) }
-                val src = iframe.attr("src")
-
-                if (!isIndonesian && src.isNotEmpty()) {
-                    iframeUrls.add(fixUrl(src))
-                }
-            }
-        }
-
-        // Pass English embed links to Cloudstream extractors
-        iframeUrls.distinct().forEach { url ->
-            loadExtractor(url, subtitleCallback, callback)
-        }
-
-        return iframeUrls.isNotEmpty()
-    }
-
-    private fun decodeEmbedValue(value: String): String {
-        return try {
-            val decoded = String(Base64.decode(value, Base64.DEFAULT))
-            Jsoup.parse(decoded).select("iframe").attr("src").ifEmpty {
-                if (value.startsWith("http")) value else ""
-            }
-        } catch (_: Exception) {
-            if (value.startsWith("http")) value else ""
-        }
+        return true
     }
 }
