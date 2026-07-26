@@ -1,11 +1,12 @@
 package com.example
 
-import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
 import android.util.Base64
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.Jsoup
 
-class ExampleProvider : MainAPI() { 
+class ExampleProvider : MainAPI() {
     override var mainUrl = "https://animexin.dev/" 
     override var name = "animexin"
     override val supportedTypes = setOf(TvType.Anime)
@@ -17,106 +18,108 @@ class ExampleProvider : MainAPI() {
         val document = app.get("$mainUrl?s=$query").document
 
         return document.select("article.bs").mapNotNull { element ->
-            val title = element.select("h2").text().trim()
-            val href = fixUrl(element.select("a").attr("href"))
-            val posterUrl = fixUrl(element.select("img").attr("src"))
+            val title = element.select("h2").text().ifEmpty { return@mapNotNull null }
+            val href = fixUrl(element.select("a").attr("href")).ifEmpty { return@mapNotNull null }
+            val posterUrl = fixUrl(element.select("img").attr("src")).ifEmpty { return@mapNotNull null }
 
-            // If we are missing crucial data, skip this element
-            if (title.isEmpty() || href.isEmpty()) return@mapNotNull null
-
-            // Return AnimeSearchResponse directly
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = posterUrl
-            }   
+            }
         }
     }
 
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        // 1. Parse basic details from the show's page
         val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: return null
+        val poster = fixUrl(document.selectFirst("div.thumb img")?.attr("src") ?: "")
         val description = document.selectFirst("div.entry-content p")?.text()?.trim()
-        val genres = document.select("div.genxrel a").map { it.text().trim() }
+        val genres = document.select("div.genxrel a").map { it.text() }
         
-        // Status parsing matching ShowStatus enum correctly
-        val statusText = document.selectFirst("div.info-content span")?.text() ?: ""
-        val status = when {
-            statusText.contains("Completed", true) -> ShowStatus.Completed
-            statusText.contains("Ongoing", true) -> ShowStatus.Ongoing
-            else -> null
+        val status = when (document.selectFirst("div.info-content span")?.text()?.contains("Completed", ignoreCase = true) == true) {
+            true -> ShowStatus.Completed
+            else -> ShowStatus.Ongoing
         }
 
-        // 2. Parse episodes list using newEpisode
-        val episodes = document.select("div.eplister ul li").mapNotNull { element ->
+        val episodes = document.select("div.episodelist ul li").mapNotNull { element ->
             val episodeHref = fixUrl(element.select("a").attr("href"))
-            if (episodeHref.isEmpty()) return@mapNotNull null
-            
-            val episodeName = element.select("div.epl-title").text().trim()
-            val episodeNumber = element.select("div.epl-num").text().toIntOrNull()
+            val episodeName = element.select("span.eps").text()
+            val episodeNumber = Regex("""\d+""").find(episodeName)?.value?.toIntOrNull()
 
-            newEpisode(episodeHref) {
-                this.name = episodeName
-                this.episode = episodeNumber
-            }
-        }.reversed() // Reverse so Episode 1 comes first (anime sites usually list newest first)
+            Episode(
+                data = episodeHref,
+                name = episodeName,
+                episode = episodeNumber
+            )
+        }.reversed()
 
-        // 3. Return using newAnimeLoadResponse with proper properties
         return newAnimeLoadResponse(title, url, TvType.Anime) {
-            this.posterUrl = fixUrl(document.selectFirst("div.thumb img")?.attr("src") ?: "")
+            this.posterUrl = poster
             this.plot = description
             this.tags = genres
-            this.showStatus = status 
-            
-            // Assign the episodes list to a Subbed or Dubbed category
-            addEpisodes(DubStatus.Subbed, episodes) 
-            
-            // Note: If your Cloudstream version doesn't recognize addEpisodes, 
-            // you can use: this.episodes[DubStatus.Subbed] = episodes
+            this.showStatus = status
+            this.episodes = mapOf(DubStatus.Sub to episodes)
         }
     }
 
     override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean {
-    // 1. Fetch the episode page
-    val document = app.get(data).document
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        offset: Int,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val document = app.get(data).document
+        val iframeUrls = mutableListOf<String>()
 
-    // 2. Select all the option tags within the mirror dropdown and grab the 'value'
-    val encodedOptions = document.select("select.mirror option").mapNotNull {
-        it.attr("value").takeIf { value -> value.isNotBlank() }
+        // Keywords that signal Indonesian servers
+        val indoKeywords = listOf("indo", "indonesia", "sub indo", "subindo")
+
+        // 1. Process server selector dropdowns (<select class="mirror">)
+        document.select("select.mirror option, option[value]").forEach { option ->
+            val labelText = option.text().lowercase()
+            val rawValue = option.attr("value").trim()
+
+            // Skip options labeled with Indonesian keywords
+            val isIndonesian = indoKeywords.any { labelText.contains(it) }
+
+            if (!isIndonesian && rawValue.isNotEmpty()) {
+                val decodedUrl = decodeEmbedValue(rawValue)
+                if (decodedUrl.isNotEmpty()) {
+                    iframeUrls.add(fixUrl(decodedUrl))
+                }
+            }
+        }
+
+        // 2. Fallback to direct iframe elements on the page (checking parent containers for Indo tags)
+        if (iframeUrls.isEmpty()) {
+            document.select("div.player-embed iframe, div.embed-responsive iframe").forEach { iframe ->
+                val parentText = iframe.parent()?.text()?.lowercase() ?: ""
+                val isIndonesian = indoKeywords.any { parentText.contains(it) }
+                val src = iframe.attr("src")
+
+                if (!isIndonesian && src.isNotEmpty()) {
+                    iframeUrls.add(fixUrl(src))
+                }
+            }
+        }
+
+        // Send filtered English embeds to Cloudstream's extractor
+        iframeUrls.distinct().forEach { url ->
+            loadExtractor(url, subtitleCallback, callback)
+        }
+
+        return iframeUrls.isNotEmpty()
     }
 
-    // 3. Process each Base64 string
-    for (encodedString in encodedOptions) {
-        try {
-            // Decode the Base64 string into plain text (HTML)
-            val decodedHtml = String(Base64.decode(encodedString, Base64.DEFAULT))
-
-            // The decoded text is an HTML snippet like: <iframe src="https://..."></iframe>
-            // We use Jsoup to parse just this tiny snippet and pull out the "src" URL
-            val iframeDocument = Jsoup.parse(decodedHtml)
-            val iframeUrl = iframeDocument.select("iframe").attr("src")
-
-            if (iframeUrl.isNotBlank()) {
-                // 4. Send the extracted URL to Cloudstream's built-in extractors
-                loadExtractor(
-                    url = fixUrl(iframeUrl),
-                    referer = data,
-                    subtitleCallback = subtitleCallback,
-                    callback = callback
-                )
+    private fun decodeEmbedValue(value: String): String {
+        return try {
+            val decoded = String(Base64.decode(value, Base64.DEFAULT))
+            Jsoup.parse(decoded).select("iframe").attr("src").ifEmpty {
+                if (value.startsWith("http")) value else ""
             }
-        } catch (e: Exception) {
-            // If one server fails to decode, skip it and continue to the next one
-            e.printStackTrace()
+        } catch (_: Exception) {
+            if (value.startsWith("http")) value else ""
         }
     }
-
-    return true
-    }
-    
 }
