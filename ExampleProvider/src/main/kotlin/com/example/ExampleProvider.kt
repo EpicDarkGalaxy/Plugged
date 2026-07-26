@@ -42,7 +42,7 @@ class ExampleProvider : MainAPI() {
         }
 
         // Fixed deprecated Episode constructor -> replaced with newEpisode
-        val episodes = document.select("div.episodelist ul li").mapNotNull { element ->
+        val episodes = document.select("div.eplister ul li").mapNotNull { element ->
             val episodeHref = fixUrl(element.select("a").attr("href"))
             val episodeName = element.select("span.eps").text()
             val episodeNumber = Regex("""\d+""").find(episodeName)?.value?.toIntOrNull()
