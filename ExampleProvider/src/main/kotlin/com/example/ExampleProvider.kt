@@ -41,46 +41,45 @@ class ExampleProvider : MainAPI() {
             else -> ShowStatus.Ongoing
         }
 
+        // Fixed deprecated Episode constructor -> replaced with newEpisode
         val episodes = document.select("div.episodelist ul li").mapNotNull { element ->
             val episodeHref = fixUrl(element.select("a").attr("href"))
             val episodeName = element.select("span.eps").text()
             val episodeNumber = Regex("""\d+""").find(episodeName)?.value?.toIntOrNull()
 
-            Episode(
-                data = episodeHref,
-                name = episodeName,
-                episode = episodeNumber
-            )
+            newEpisode(episodeHref) {
+                this.name = episodeName
+                this.episode = episodeNumber
+            }
         }.reversed()
 
+        // Fixed DubStatus.Sub -> DubStatus.Subbed and mapped with mutableMapOf
         return newAnimeLoadResponse(title, url, TvType.Anime) {
             this.posterUrl = poster
             this.plot = description
             this.tags = genres
             this.showStatus = status
-            this.episodes = mapOf(DubStatus.Sub to episodes)
+            this.episodes = mutableMapOf(DubStatus.Subbed to episodes)
         }
     }
 
+    // Fixed function signature by removing offset parameter
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
-        offset: Int,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
         val iframeUrls = mutableListOf<String>()
 
-        // Keywords that signal Indonesian servers
         val indoKeywords = listOf("indo", "indonesia", "sub indo", "subindo")
 
-        // 1. Process server selector dropdowns (<select class="mirror">)
+        // 1. Process server selector dropdowns
         document.select("select.mirror option, option[value]").forEach { option ->
             val labelText = option.text().lowercase()
             val rawValue = option.attr("value").trim()
 
-            // Skip options labeled with Indonesian keywords
             val isIndonesian = indoKeywords.any { labelText.contains(it) }
 
             if (!isIndonesian && rawValue.isNotEmpty()) {
@@ -91,7 +90,7 @@ class ExampleProvider : MainAPI() {
             }
         }
 
-        // 2. Fallback to direct iframe elements on the page (checking parent containers for Indo tags)
+        // 2. Fallback to direct iframe elements on the page
         if (iframeUrls.isEmpty()) {
             document.select("div.player-embed iframe, div.embed-responsive iframe").forEach { iframe ->
                 val parentText = iframe.parent()?.text()?.lowercase() ?: ""
@@ -104,7 +103,7 @@ class ExampleProvider : MainAPI() {
             }
         }
 
-        // Send filtered English embeds to Cloudstream's extractor
+        // Pass English embed links to Cloudstream extractors
         iframeUrls.distinct().forEach { url ->
             loadExtractor(url, subtitleCallback, callback)
         }
